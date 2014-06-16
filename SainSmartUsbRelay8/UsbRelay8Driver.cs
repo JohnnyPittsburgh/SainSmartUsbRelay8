@@ -5,8 +5,10 @@ using System.Text;
 using System.Threading.Tasks;
 using FTD2XX_NET;
 
-// Do List
-// 1) Add the ability to add relay device by serial number
+
+// TODO: List
+// TODO: 1) Add the ability to add a relay device by serial number
+// TODO: 2) Add the abiility to set a relay by serial number and relay number
 
 
 namespace UsbRelay8Driver
@@ -51,6 +53,16 @@ namespace UsbRelay8Driver
             get { return "SainSmart USB relay write error."; }
         }
     }
+
+    class UsbRelayStatusException : Exception
+    {
+        public override string Message
+        {
+            get { return "SainSmart USB status not OK error."; }
+        }
+    }
+
+
     #endregion // Exceptions
 
     /// <summary>
@@ -70,9 +82,9 @@ namespace UsbRelay8Driver
         #endregion // Constants
 
         #region Private Variables
-        uint _deviceIndex;
         FTDI _device;
         FTDI.FT_STATUS _status;
+        byte _values;
 
         // FTD2 driver requires byte arrays, only a byte is needed for device
         byte[] _writeBuffer = new byte[2];
@@ -81,29 +93,23 @@ namespace UsbRelay8Driver
         #endregion // Private Variables
 
         #region Public Properties
-        /// <summary>
-        /// Relay Device ID
-        /// </summary>
-        public uint DeviceIndex
+        public byte Values
         {
-            get {return _deviceIndex; }
-            private set;
+            get { return _values; }
         }
-
         #endregion // Public Properties
 
         #region Constuctors
         /// <summary>
-        /// Create a USB Relay Device
+        /// Create a USB Relay Device and open it by the serial number
         /// </summary>
-        /// <param name="deviceIndex">Device Index from FTDI driver</param>
-        public UsbRelay8( uint deviceIndex )
+        /// <param name="serialNumber">Device serial number</param>
+        public UsbRelay8( String serialNumber )
         {
-
-            // Open the relay device
+            // Open the relay device by serial number
+            //  The serial number is always uniques, so the safest
             _device = new FTDI();
-            _deviceIndex = deviceIndex;
-            _status = _device.OpenByIndex(_deviceIndex);
+            _status = _device.OpenBySerialNumber(serialNumber);
             if (_status != FTDI.FT_STATUS.FT_OK)
             {
                 throw new UsbRelayDeviceNotFoundException();
@@ -122,6 +128,13 @@ namespace UsbRelay8Driver
             {
                 throw new UsbRelayConfigurationException();
             }
+
+            // Clear all the relays
+            // Note: From the Data Sheet, when in Sync Mode you can
+            //  only read the interface pins when writing.  So start
+            //  start out with all the values cleared.
+            _values = 0x00;
+            SetRelays(_values);
         }
 
         #endregion  // Constructors
@@ -133,19 +146,22 @@ namespace UsbRelay8Driver
         /// <returns></returns>
         public byte GetRelayValues()
         {
-            // Clear the read buffer
-            Array.Clear(_readBuffer, 0, _readBuffer.Length);
+            return _values;
+        }
 
-            // Read the relay values
-            uint readBytes = 1;
-            uint bytesRead = 0;
-            _status = _device.Read(_readBuffer, readBytes, ref bytesRead);
-            if (_status != FTDI.FT_STATUS.FT_OK || bytesRead != 1)
+        public bool GetRelayValue(int relay)
+        {
+            byte values = GetRelayValues();
+
+            byte mask = (byte) (~(byte)(1 << (relay - 1)));
+            if ( (mask & values) > 0)
             {
-                throw new UsbRelayReadException();
+                return true;
             }
-
-            return _readBuffer[0];
+            else
+            {
+                return false;
+            }
         }
 
         /// <summary>
@@ -177,6 +193,7 @@ namespace UsbRelay8Driver
                 // Clearing a relay value, and it out
                 newValue &= (byte) ~bitValue;
             }
+            _values = newValue;
             _writeBuffer[0] = newValue;
 
             // Write the value
@@ -195,6 +212,7 @@ namespace UsbRelay8Driver
         public void SetRelays(byte values)
         {
             // Set the write buffer with the values
+            _values = values;
             _writeBuffer[0] = values;
 
             // Write the value
@@ -222,8 +240,15 @@ namespace UsbRelay8Driver
         #endregion      // Constants
        
         #region Private Variables
-        private bool _Opened = false;
-        private int _DeviceCount = 0;
+        FTDI _device;
+        FTDI.FT_STATUS _status;
+        FTDI.FT_DEVICE_INFO_NODE[] _deviceList;
+
+        Dictionary<String, UsbRelay8> _relays;
+
+        List<string> _serialNumbers;
+        List<uint> _locationIds;
+        List<uint> _ids;
         #endregion
 
         #region Properties
@@ -234,19 +259,148 @@ namespace UsbRelay8Driver
         public int DeviceCount
         {
             get { return GetDeviceCount(); }
-            private set;
+        }
+        
+        /// <summary>
+        /// Device List
+        /// </summary>
+        public FTDI.FT_DEVICE_INFO_NODE[] Devices
+        {
+            get 
+            {
+                PopulateDeviceList();
+                return _deviceList;
+            }
         }
 
         /// <summary>
-        /// Return the device count
+        /// Device serial numbers as a list of strings
         /// </summary>
-        /// <returns></returns>
-        private int GetDeviceCount()
+        public List<String> DeviceSerialNumbers
         {
-            throw new NotImplementedException();
+            get
+            {
+                PopulateDeviceList();
+                return _serialNumbers;
+            }
         }
 
-        #endregion      // Constants
+        /// <summary>
+        /// Device location IDs as list of uints
+        /// </summary>
+        public List<uint> DeviceLocationIDs
+        {
+            get
+            {
+                PopulateDeviceList();
+                return _locationIds;
+            }
+        }
+
+        /// <summary>
+        /// Device IDs as a list of uints
+        /// </summary>
+        public List<uint> DeviceIDs
+        {
+            get
+            {
+                PopulateDeviceList();
+                return _ids;
+            }
+        }
+
+        #endregion //Properties
+
+
+        #region Constructor
+        public UsbRelays()
+        {
+            _device = new FTDI();
+            _relays = new Dictionary<string, UsbRelay8>();
+        }
+        #endregion  // Constructor
+
+
+        #region Public Methods
+        
+        public void OpenDevice(string serialNumber)
+        {
+            UsbRelay8 relay = new UsbRelay8(serialNumber);
+            _relays.Add(serialNumber, relay);
+        }
+
+        public void SetRelay(string serialNumber, int relay, bool value)
+        {
+            _relays[serialNumber].SetRelay(relay, value);
+        }
+
+        public void SetRelays(string serialNumber, byte values)
+        {
+            _relays[serialNumber].SetRelays(values);
+        }
+
+        public bool GetRelay(string serialNumber, int relay)
+        {
+            return _relays[serialNumber].GetRelayValue(relay);
+        }
+
+        public byte GetRelays(string serialNumber)
+        {
+            return _relays[serialNumber].GetRelayValues();
+        }
+
+
+        #endregion  // Public Methods
+
+
+        #region Private Methods
+        /// <summary>
+        /// Return the device count
+        /// </summary>
+        /// <returns>Number of devices</returns>
+        private int GetDeviceCount()
+        {
+            uint count = 0;
+            _status = _device.GetNumberOfDevices(ref count);
+            if (_status != FTDI.FT_STATUS.FT_OK)
+            {
+                throw new UsbRelayStatusException();
+            }
+
+            return (int)count;
+        }
+
+        private void PopulateDeviceList()
+        {
+            // Have to create known size array to get the device list
+            int count = GetDeviceCount();
+            _deviceList = new FTDI.FT_DEVICE_INFO_NODE[count];
+            _status = _device.GetDeviceList(_deviceList);
+            if (_status != FTDI.FT_STATUS.FT_OK)
+            {
+                throw new UsbRelayStatusException();
+            }
+
+            // Create new lists to populate
+            _serialNumbers = new List<string>();
+            _locationIds = new List<uint>();
+            _ids = new List<uint>();
+
+            // Populate each list
+            foreach( FTDI.FT_DEVICE_INFO_NODE device in _deviceList)
+            {
+                _serialNumbers.Add(device.SerialNumber);
+                Console.WriteLine("Serial Number: " + device.SerialNumber);
+
+                _locationIds.Add(device.LocId);
+                Console.WriteLine("Location ID: " + device.LocId.ToString());
+
+                _ids.Add(device.ID);
+                Console.WriteLine("ID: " + device.ID.ToString());
+            }
+        }
+
+        #endregion      // Private Methods
 
     }
 }
