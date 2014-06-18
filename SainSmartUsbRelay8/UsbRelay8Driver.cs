@@ -190,19 +190,12 @@ namespace UsbRelay8Driver
             }
             else
             {
-                // Clearing a relay value, and it out
+                // Clearing a relay value, AND it out
                 newValue &= (byte) ~bitValue;
             }
             _values = newValue;
-            _writeBuffer[0] = newValue;
 
-            // Write the value
-            uint bytesWritten = 0;
-            _status = _device.Write(_writeBuffer, 1, ref bytesWritten);
-            if (_status != FTDI.FT_STATUS.FT_OK || bytesWritten != 1)
-            {
-                throw new UsbRelayWriteException();
-            }
+            SetRelays(_values);
         }
 
         /// <summary>
@@ -222,6 +215,7 @@ namespace UsbRelay8Driver
             {
                 throw new UsbRelayWriteException();
             }
+            Console.WriteLine( String.Format("SetRelays(0x{0:x2})", _values));
         }
 
         #endregion  // Public Methods

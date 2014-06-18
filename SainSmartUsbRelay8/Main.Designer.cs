@@ -47,7 +47,6 @@
             this.cbDevices.Name = "cbDevices";
             this.cbDevices.Size = new System.Drawing.Size(151, 21);
             this.cbDevices.TabIndex = 0;
-            this.cbDevices.SelectedIndexChanged += new System.EventHandler(this.cbDevices_SelectedIndexChanged);
             // 
             // gbConnect
             // 

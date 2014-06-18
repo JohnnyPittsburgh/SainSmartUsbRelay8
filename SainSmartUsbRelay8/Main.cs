@@ -28,9 +28,6 @@ namespace SainSmartUsbRelay8
             // Populate the Device Count
             tbDeviceCount.Text = _relays.DeviceCount.ToString();
 
-            // Populate the USB Relay Devices Drop Down
-            cbDevices.DataSource = _relays.DeviceSerialNumbers;
-
             // Open each device
             foreach( string device in _relays.DeviceSerialNumbers)
             {
@@ -39,6 +36,13 @@ namespace SainSmartUsbRelay8
 
             // Populate the relay check Boxes
             CreateRelayCheckBoxes();
+
+            // Populate the USB Relay Devices Drop Down
+            cbDevices.DataSource = _relays.DeviceSerialNumbers;
+
+            // Add the combo box idex changed event
+            //  Have to do it here to ensure everything is created and ready to go.
+            cbDevices.SelectedIndexChanged += cbDevices_SelectedIndexChanged;
         }
 
 
@@ -71,10 +75,17 @@ namespace SainSmartUsbRelay8
             }
 
             byte values = _relays.GetRelays(sn);
+            //Console.WriteLine("SN: " + sn + "  Values: " + values.ToString());
 
             foreach( CheckBox cb in _relayControls )
             {
-                byte mask = (byte) (~(byte)(1 << ( (int)cb.Tag - 1)));
+                int relayNum = (int)cb.TabIndex;
+                byte mask = (byte)(1 << relayNum);
+
+                //Console.WriteLine("relayNum: " + relayNum.ToString() +
+                //    String.Format("  values {0:x}", values) + 
+                //    String.Format("  mask {0:x}", mask) );
+                    
                 if ((mask & values) > 0)
                 {
                     cb.Checked = true;
@@ -100,7 +111,8 @@ namespace SainSmartUsbRelay8
 
         private void cbDevices_SelectedIndexChanged(object sender, EventArgs e)
         {
-
+            //Console.WriteLine("Relay item changed!");
+            UpdateRelays();
         }
     }
 }
